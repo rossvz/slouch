@@ -1,4 +1,5 @@
 import Config
+config :ash, policies: [show_policy_breakdowns?: true]
 
 # Configure your database
 config :slouch, Slouch.Repo,
@@ -68,7 +69,7 @@ config :slouch, SlouchWeb.Endpoint,
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :slouch, dev_routes: true
+config :slouch, dev_routes: true, token_signing_secret: "YtNttvT5rJnVoSedkvcyCIOA5elUOMZV"
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

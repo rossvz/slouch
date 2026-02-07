@@ -35,3 +35,6 @@ slouch-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Playwright MCP debug logs
+.playwright-mcp/
+

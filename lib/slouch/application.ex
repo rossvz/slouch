@@ -15,7 +15,9 @@ defmodule Slouch.Application do
       # Start a worker by calling: Slouch.Worker.start_link(arg)
       # {Slouch.Worker, arg},
       # Start to serve requests, typically the last entry
-      SlouchWeb.Endpoint
+      SlouchWeb.Endpoint,
+      SlouchWeb.Presence,
+      {AshAuthentication.Supervisor, [otp_app: :slouch]}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

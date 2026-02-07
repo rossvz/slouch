@@ -2,6 +2,7 @@
    https://tailwindcss.com/docs/configuration */
 
 @import "tailwindcss" source(none);
+@source "../../deps/ash_authentication_phoenix";
 @source "../css";
 @source "../js";
 @source "../../lib/slouch_web";
@@ -103,3 +104,41 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+.message-row:hover .message-actions {
+  opacity: 1;
+}
+
+.message-compact {
+  padding-left: 3rem;
+}
+
+.message-compact .compact-time {
+  opacity: 0;
+}
+
+.message-compact:hover .compact-time {
+  opacity: 0.5;
+}
+
+textarea.message-textarea {
+  resize: none;
+  overflow-y: auto;
+  min-height: 2.5rem;
+  max-height: 200px;
+}
+
+.thread-panel {
+  transition: width 150ms ease-in-out;
+}
+
+.presence-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid oklch(var(--b1));
+}
+
+.dropdown-content {
+  z-index: 50 !important;
+}
