@@ -179,7 +179,7 @@ defmodule SlouchWeb.ChatLiveTest do
   end
 
   describe "reactions" do
-    test "toggles a reaction on a message", %{conn: conn, user: user, channel: channel} do
+    test "adds a reaction to a message", %{conn: conn, user: user, channel: channel} do
       message = create_message(channel, user, %{body: "React to me"})
 
       {:ok, view, _html} = live(conn, ~p"/chat/#{channel.name}")
@@ -195,6 +195,27 @@ defmodule SlouchWeb.ChatLiveTest do
 
       assert length(reactions) == 1
       assert hd(reactions).emoji == "👍"
+    end
+
+    test "removes a reaction when toggled twice", %{conn: conn, user: user, channel: channel} do
+      message = create_message(channel, user, %{body: "React to me"})
+
+      {:ok, view, _html} = live(conn, ~p"/chat/#{channel.name}")
+
+      selector = "button[phx-click='toggle_reaction'][phx-value-message-id='#{message.id}'][phx-value-emoji='👍'][title]"
+
+      view |> element(selector) |> render_click()
+
+      assert Slouch.Chat.Reaction
+             |> Ash.Query.for_read(:by_message, %{message_id: message.id})
+             |> Ash.read!()
+             |> length() == 1
+
+      view |> element(selector) |> render_click()
+
+      assert Slouch.Chat.Reaction
+             |> Ash.Query.for_read(:by_message, %{message_id: message.id})
+             |> Ash.read!() == []
     end
   end
 

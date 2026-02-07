@@ -71,6 +71,20 @@ defmodule Slouch.Chat.MessageTest do
       assert Enum.map(messages, & &1.body) == ["first", "second"]
     end
 
+    test "preloads user, reply_count, and reactions", %{user: user, channel: channel} do
+      message = create_message(channel, user, %{body: "preloaded"})
+      create_reaction(message, user, "👍")
+
+      [loaded] =
+        Slouch.Chat.Message
+        |> Ash.Query.for_read(:by_channel, %{channel_id: channel.id})
+        |> Ash.read!()
+
+      assert loaded.user.id == user.id
+      assert loaded.reply_count == 0
+      assert length(loaded.reactions) == 1
+    end
+
     test "does not return messages from other channels", %{user: user, channel: channel} do
       other_channel = create_channel()
       create_message(channel, user, %{body: "in channel"})

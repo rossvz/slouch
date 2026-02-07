@@ -67,17 +67,19 @@ defmodule Slouch.Chat.ReactionTest do
       assert "😂" in emojis
     end
 
-    test "does not return reactions from other messages", %{user: user, channel: channel} do
+    test "does not return reactions from other messages", %{user: user, channel: channel, message: message} do
+      create_reaction(message, user, "👍")
+
       other_message = create_message(channel, user, %{body: "other"})
       create_reaction(other_message, user, "🚀")
 
       reactions =
         Slouch.Chat.Reaction
-        |> Ash.Query.for_read(:by_message, %{message_id: other_message.id})
+        |> Ash.Query.for_read(:by_message, %{message_id: message.id})
         |> Ash.read!()
 
       assert length(reactions) == 1
-      assert hd(reactions).emoji == "🚀"
+      assert hd(reactions).emoji == "👍"
     end
   end
 
