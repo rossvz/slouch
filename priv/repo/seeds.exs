@@ -1,5 +1,5 @@
 alias Slouch.Accounts.User
-alias Slouch.Chat.{Channel, Message, Membership}
+alias Slouch.Chat.{Channel, Message, Membership, Conversation, ConversationParticipant, DirectMessage}
 
 IO.puts("Seeding database...")
 
@@ -96,4 +96,30 @@ for {user, body} <- [
 end
 
 IO.puts("Created sample messages")
+
+# Create a DM conversation between Alice and Bob
+conversation =
+  Conversation
+  |> Ash.Changeset.for_create(:create, %{})
+  |> Ash.create!()
+
+for user <- [alice, bob] do
+  ConversationParticipant
+  |> Ash.Changeset.for_create(:create, %{conversation_id: conversation.id, user_id: user.id})
+  |> Ash.create!()
+end
+
+for {user, body} <- [
+  {alice, "Hey Bob, want to grab lunch?"},
+  {bob, "Sure! How about noon?"},
+  {alice, "Perfect, see you then!"}
+] do
+  DirectMessage
+  |> Ash.Changeset.for_create(:create, %{body: body, conversation_id: conversation.id}, actor: user)
+  |> Ash.create!()
+
+  Process.sleep(10)
+end
+
+IO.puts("Created DM conversation between Alice and Bob")
 IO.puts("Seeding complete!")
