@@ -14,6 +14,23 @@ defmodule Slouch.Chat.DmReaction do
     end
   end
 
+  actions do
+    defaults [:read, :destroy]
+
+    create :react do
+      accept [:emoji]
+      argument :direct_message_id, :uuid, allow_nil?: false
+      change manage_relationship(:direct_message_id, :direct_message, type: :append)
+      change relate_actor(:user)
+    end
+
+    read :by_direct_message do
+      argument :direct_message_id, :uuid, allow_nil?: false
+      filter expr(direct_message_id == ^arg(:direct_message_id))
+      prepare build(load: [:user])
+    end
+  end
+
   attributes do
     uuid_primary_key :id
 
@@ -32,22 +49,5 @@ defmodule Slouch.Chat.DmReaction do
 
   identities do
     identity :unique_dm_reaction, [:direct_message_id, :user_id, :emoji]
-  end
-
-  actions do
-    defaults [:read, :destroy]
-
-    create :react do
-      accept [:emoji]
-      argument :direct_message_id, :uuid, allow_nil?: false
-      change manage_relationship(:direct_message_id, :direct_message, type: :append)
-      change relate_actor(:user)
-    end
-
-    read :by_direct_message do
-      argument :direct_message_id, :uuid, allow_nil?: false
-      filter expr(direct_message_id == ^arg(:direct_message_id))
-      prepare build(load: [:user])
-    end
   end
 end

@@ -33,7 +33,10 @@ defmodule Slouch.Chat.Message do
 
       filter expr(channel_id == ^arg(:channel_id) and is_nil(parent_message_id))
 
-      prepare build(sort: [inserted_at: :asc], load: [:reply_count, user: [:avatar_url, :display_label], reactions: [:user]])
+      prepare build(
+                sort: [inserted_at: :asc],
+                load: [:reply_count, user: [:avatar_url, :display_label], reactions: [:user]]
+              )
     end
 
     read :thread_replies do

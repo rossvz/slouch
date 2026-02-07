@@ -64,16 +64,18 @@ defmodule Slouch.Bots.Handlers.GithubIssueBot do
     else
       issue_number = :rand.uniform(999)
       url = "https://github.com/example/slouch/issues/#{issue_number}"
-      Logger.info("Mock GitHub issue created: #{url} (set :github_token and :github_repo to use real API)")
+
+      Logger.info(
+        "Mock GitHub issue created: #{url} (set :github_token and :github_repo to use real API)"
+      )
+
       {:ok, url}
     end
   end
 
   defp add_reaction(message, bot) do
     Slouch.Chat.Reaction
-    |> Ash.Changeset.for_create(:react, %{emoji: "✅", message_id: message.id},
-      actor: bot.user
-    )
+    |> Ash.Changeset.for_create(:react, %{emoji: "✅", message_id: message.id}, actor: bot.user)
     |> Ash.create(authorize?: false)
 
     if channel_id = message.channel_id do
@@ -94,7 +96,7 @@ defmodule Slouch.Bots.Handlers.GithubIssueBot do
         actor: bot.user
       )
       |> Ash.create!(authorize?: false)
-      |> Ash.load!([user: [:avatar_url, :display_label]])
+      |> Ash.load!(user: [:avatar_url, :display_label])
 
     Phoenix.PubSub.broadcast(
       Slouch.PubSub,

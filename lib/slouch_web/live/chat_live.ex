@@ -348,29 +348,44 @@ defmodule SlouchWeb.ChatLive do
   end
 
   def handle_event("open_thread", %{"message-id" => message_id}, socket) do
-    parent = Ash.get!(Slouch.Chat.Message, message_id, load: [user: [:avatar_url, :display_label]])
+    parent =
+      Ash.get!(Slouch.Chat.Message, message_id, load: [user: [:avatar_url, :display_label]])
 
     replies =
       Slouch.Chat.Message
       |> Ash.Query.for_read(:thread_replies, %{parent_message_id: message_id})
       |> Ash.read!()
 
-    {:noreply, assign(socket, show_thread: true, thread_parent: parent, thread_replies: replies, thread_type: :channel)}
+    {:noreply,
+     assign(socket,
+       show_thread: true,
+       thread_parent: parent,
+       thread_replies: replies,
+       thread_type: :channel
+     )}
   end
 
   def handle_event("open_dm_thread", %{"message-id" => message_id}, socket) do
-    parent = Ash.get!(Slouch.Chat.DirectMessage, message_id, load: [user: [:avatar_url, :display_label]])
+    parent =
+      Ash.get!(Slouch.Chat.DirectMessage, message_id, load: [user: [:avatar_url, :display_label]])
 
     replies =
       Slouch.Chat.DirectMessage
       |> Ash.Query.for_read(:thread_replies, %{parent_message_id: message_id})
       |> Ash.read!()
 
-    {:noreply, assign(socket, show_thread: true, thread_parent: parent, thread_replies: replies, thread_type: :dm)}
+    {:noreply,
+     assign(socket,
+       show_thread: true,
+       thread_parent: parent,
+       thread_replies: replies,
+       thread_type: :dm
+     )}
   end
 
   def handle_event("close_thread", _, socket) do
-    {:noreply, assign(socket, show_thread: false, thread_parent: nil, thread_replies: [], thread_type: nil)}
+    {:noreply,
+     assign(socket, show_thread: false, thread_parent: nil, thread_replies: [], thread_type: nil)}
   end
 
   def handle_event("send_reply", %{"body" => body}, socket) do
@@ -399,7 +414,7 @@ defmodule SlouchWeb.ChatLive do
         actor: socket.assigns.current_user
       )
       |> Ash.create!()
-      |> Ash.load!([user: [:avatar_url, :display_label]])
+      |> Ash.load!(user: [:avatar_url, :display_label])
 
     Phoenix.PubSub.broadcast(
       Slouch.PubSub,
@@ -423,7 +438,7 @@ defmodule SlouchWeb.ChatLive do
         actor: socket.assigns.current_user
       )
       |> Ash.create!()
-      |> Ash.load!([user: [:avatar_url, :display_label]])
+      |> Ash.load!(user: [:avatar_url, :display_label])
 
     Phoenix.PubSub.broadcast(
       Slouch.PubSub,
@@ -441,7 +456,13 @@ defmodule SlouchWeb.ChatLive do
     if MapSet.member?(existing_ids, message.id) do
       {:noreply, socket}
     else
-      message = Ash.load!(message, [:reply_count, user: [:avatar_url, :display_label], reactions: [:user]], actor: socket.assigns.current_user)
+      message =
+        Ash.load!(
+          message,
+          [:reply_count, user: [:avatar_url, :display_label], reactions: [:user]],
+          actor: socket.assigns.current_user
+        )
+
       {:noreply, assign(socket, messages: socket.assigns.messages ++ [message])}
     end
   end
@@ -575,7 +596,7 @@ defmodule SlouchWeb.ChatLive do
         |> Ash.create!()
       end
 
-      Ash.load!(conversation, [participants: [user: [:avatar_url, :display_label]]])
+      Ash.load!(conversation, participants: [user: [:avatar_url, :display_label]])
     end
   end
 
@@ -629,7 +650,10 @@ defmodule SlouchWeb.ChatLive do
     |> Enum.with_index()
     |> Enum.map(fn {msg, idx} ->
       prev = if idx > 0, do: Enum.at(messages, idx - 1)
-      show_date = prev == nil || DateTime.to_date(msg.inserted_at) != DateTime.to_date(prev.inserted_at)
+
+      show_date =
+        prev == nil || DateTime.to_date(msg.inserted_at) != DateTime.to_date(prev.inserted_at)
+
       compact = prev != nil && !show_date && same_author_group?(msg, prev)
       {msg, show_date, compact}
     end)
@@ -720,9 +744,16 @@ defmodule SlouchWeb.ChatLive do
                 <span class="text-lg leading-none">+</span>
                 <span>New message</span>
               </div>
-              <ul tabindex="0" class="dropdown-content z-50 menu p-2 shadow-lg bg-base-200 rounded-box w-56 mt-1">
+              <ul
+                tabindex="0"
+                class="dropdown-content z-50 menu p-2 shadow-lg bg-base-200 rounded-box w-56 mt-1"
+              >
                 <li :for={u <- @all_users}>
-                  <button phx-click="start_dm" phx-value-user-id={u.id} class="flex items-center gap-2">
+                  <button
+                    phx-click="start_dm"
+                    phx-value-user-id={u.id}
+                    class="flex items-center gap-2"
+                  >
                     <div class="avatar">
                       <div class="w-6 h-6 rounded-full">
                         <img src={u.avatar_url} alt={to_string(u.display_label)} />
@@ -738,7 +769,10 @@ defmodule SlouchWeb.ChatLive do
 
         <div class="p-3 border-t border-base-content/10">
           <div class="flex items-center gap-3">
-            <div class="relative cursor-pointer" onclick="document.getElementById('profile-modal').showModal()">
+            <div
+              class="relative cursor-pointer"
+              onclick="document.getElementById('profile-modal').showModal()"
+            >
               <div class="avatar">
                 <div class="w-9 rounded-full">
                   <img src={@current_user.avatar_url} alt="Avatar" />
@@ -748,7 +782,10 @@ defmodule SlouchWeb.ChatLive do
             </div>
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium truncate">{@current_user.display_label}</div>
-              <div :if={@current_user.status_emoji || @current_user.status_text} class="text-xs text-base-content/60 truncate">
+              <div
+                :if={@current_user.status_emoji || @current_user.status_text}
+                class="text-xs text-base-content/60 truncate"
+              >
                 {if @current_user.status_emoji, do: @current_user.status_emoji <> " ", else: ""}{@current_user.status_text}
               </div>
             </div>
@@ -786,7 +823,9 @@ defmodule SlouchWeb.ChatLive do
                   <div class="text-4xl mb-3">#</div>
                   <h3 class="text-lg font-bold mb-1">This is the beginning of #{@channel.name}</h3>
                   <p :if={@channel.topic} class="text-sm opacity-60 max-w-md">{@channel.topic}</p>
-                  <p :if={!@channel.topic} class="text-sm opacity-50">Send a message to get the conversation started.</p>
+                  <p :if={!@channel.topic} class="text-sm opacity-50">
+                    Send a message to get the conversation started.
+                  </p>
                 </div>
               <% else %>
                 <.message_list
@@ -816,7 +855,6 @@ defmodule SlouchWeb.ChatLive do
                 </div>
               </form>
             </div>
-
           <% :dm -> %>
             <% other = other_participant(@conversation, @current_user.id) %>
             <header class="border-b border-base-300 px-5 py-3 flex-shrink-0 flex items-center gap-3">
@@ -861,7 +899,9 @@ defmodule SlouchWeb.ChatLive do
                     id="dm-input"
                     name="body"
                     phx-hook="MessageInput"
-                    placeholder={if other, do: "Message #{to_string(other.display_label)}", else: "Message"}
+                    placeholder={
+                      if other, do: "Message #{to_string(other.display_label)}", else: "Message"
+                    }
                     class="message-textarea textarea textarea-bordered w-full pr-16 leading-normal"
                     autocomplete="off"
                     rows="1"
@@ -872,7 +912,6 @@ defmodule SlouchWeb.ChatLive do
                 </div>
               </form>
             </div>
-
           <% _ -> %>
             <div class="flex-1 flex flex-col items-center justify-center text-center p-8">
               <h1 class="text-4xl font-bold mb-2 tracking-tight">SLOUCH</h1>
@@ -886,7 +925,10 @@ defmodule SlouchWeb.ChatLive do
         <% end %>
       </main>
 
-      <div :if={@show_thread} class="thread-panel w-96 border-l border-base-300 flex flex-col bg-base-100 flex-shrink-0">
+      <div
+        :if={@show_thread}
+        class="thread-panel w-96 border-l border-base-300 flex flex-col bg-base-100 flex-shrink-0"
+      >
         <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
           <h3 class="font-bold">Thread</h3>
           <button phx-click="close_thread" class="btn btn-ghost btn-sm btn-circle">
@@ -979,40 +1021,81 @@ defmodule SlouchWeb.ChatLive do
 
           <div class="form-control mb-3">
             <label class="label"><span class="label-text">Display Name</span></label>
-            <input type="text" name="display_name" value={@current_user.display_name}
-              placeholder="How should others see you?" class="input input-bordered" />
+            <input
+              type="text"
+              name="display_name"
+              value={@current_user.display_name}
+              placeholder="How should others see you?"
+              class="input input-bordered"
+            />
           </div>
 
           <div class="form-control mb-3">
             <label class="label"><span class="label-text">Status</span></label>
-            <input type="text" name="status_text" value={@current_user.status_text}
-              placeholder="What's your status?" class="input input-bordered" />
+            <input
+              type="text"
+              name="status_text"
+              value={@current_user.status_text}
+              placeholder="What's your status?"
+              class="input input-bordered"
+            />
             <input type="hidden" name="status_emoji" value={@current_user.status_emoji} />
           </div>
 
           <div class="form-control mb-3" id="theme-selector" phx-hook="ThemeSelector">
             <label class="label"><span class="label-text">Theme</span></label>
             <div class="flex flex-wrap gap-2">
-              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="system" class="btn btn-sm">
+              <button
+                type="button"
+                phx-click={JS.dispatch("phx:set-theme")}
+                data-phx-theme="system"
+                class="btn btn-sm"
+              >
                 <.icon name="hero-computer-desktop-micro" class="size-4" /> System
               </button>
-              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="light" class="btn btn-sm">
+              <button
+                type="button"
+                phx-click={JS.dispatch("phx:set-theme")}
+                data-phx-theme="light"
+                class="btn btn-sm"
+              >
                 <.icon name="hero-sun-micro" class="size-4" /> Light
               </button>
-              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="dark" class="btn btn-sm">
+              <button
+                type="button"
+                phx-click={JS.dispatch("phx:set-theme")}
+                data-phx-theme="dark"
+                class="btn btn-sm"
+              >
                 <.icon name="hero-moon-micro" class="size-4" /> Dark
               </button>
-              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="catppuccin-latte" class="btn btn-sm">
+              <button
+                type="button"
+                phx-click={JS.dispatch("phx:set-theme")}
+                data-phx-theme="catppuccin-latte"
+                class="btn btn-sm"
+              >
                 <.icon name="hero-sun-micro" class="size-4" /> Catppuccin Latte
               </button>
-              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="catppuccin-mocha" class="btn btn-sm">
+              <button
+                type="button"
+                phx-click={JS.dispatch("phx:set-theme")}
+                data-phx-theme="catppuccin-mocha"
+                class="btn btn-sm"
+              >
                 <.icon name="hero-moon-micro" class="size-4" /> Catppuccin Mocha
               </button>
             </div>
           </div>
 
           <div class="modal-action">
-            <button type="button" onclick="document.getElementById('profile-modal').close()" class="btn">Cancel</button>
+            <button
+              type="button"
+              onclick="document.getElementById('profile-modal').close()"
+              class="btn"
+            >
+              Cancel
+            </button>
             <button type="submit" class="btn btn-primary">Save</button>
           </div>
         </form>
@@ -1057,7 +1140,9 @@ defmodule SlouchWeb.ChatLive do
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline gap-2">
-              <span class="font-semibold text-sm hover:underline cursor-pointer">{user_display(msg)}</span>
+              <span class="font-semibold text-sm hover:underline cursor-pointer">
+                {user_display(msg)}
+              </span>
               <.bot_badge :if={Map.get(msg.user, :is_bot, false)} />
               <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
             </div>

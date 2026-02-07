@@ -33,7 +33,10 @@ defmodule Slouch.Chat.DirectMessage do
 
       filter expr(conversation_id == ^arg(:conversation_id) and is_nil(parent_message_id))
 
-      prepare build(sort: [inserted_at: :asc], load: [:reply_count, user: [:avatar_url, :display_label], reactions: [:user]])
+      prepare build(
+                sort: [inserted_at: :asc],
+                load: [:reply_count, user: [:avatar_url, :display_label], reactions: [:user]]
+              )
     end
 
     read :thread_replies do
@@ -62,7 +65,10 @@ defmodule Slouch.Chat.DirectMessage do
   relationships do
     belongs_to :conversation, Slouch.Chat.Conversation, allow_nil?: false
     belongs_to :user, Slouch.Accounts.User, allow_nil?: false
-    belongs_to :parent_message, Slouch.Chat.DirectMessage, allow_nil?: true, define_attribute?: false
+
+    belongs_to :parent_message, Slouch.Chat.DirectMessage,
+      allow_nil?: true,
+      define_attribute?: false
 
     has_many :replies, Slouch.Chat.DirectMessage, destination_attribute: :parent_message_id
     has_many :reactions, Slouch.Chat.DmReaction

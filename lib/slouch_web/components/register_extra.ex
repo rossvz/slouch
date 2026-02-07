@@ -6,7 +6,10 @@ defmodule SlouchWeb.Components.RegisterExtra do
   def render(assigns) do
     ~H"""
     <div class="mt-2 mb-2">
-      <label class="block text-sm font-medium text-base-content mb-1" for={input_id(@form, :display_name)}>
+      <label
+        class="block text-sm font-medium text-base-content mb-1"
+        for={input_id(@form, :display_name)}
+      >
         Display name
       </label>
       {text_input(@form, :display_name,

@@ -30,7 +30,11 @@ defmodule Slouch.TestHelpers do
     parent_message_id = Map.get(attrs, :parent_message_id)
 
     params = %{body: body, channel_id: channel.id}
-    params = if parent_message_id, do: Map.put(params, :parent_message_id, parent_message_id), else: params
+
+    params =
+      if parent_message_id,
+        do: Map.put(params, :parent_message_id, parent_message_id),
+        else: params
 
     Slouch.Chat.Message
     |> Ash.Changeset.for_create(:create, params, actor: user)

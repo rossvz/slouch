@@ -58,11 +58,6 @@ defmodule Slouch.Accounts.User do
     repo Slouch.Repo
   end
 
-  calculations do
-    calculate :avatar_url, :string, expr("https://api.dicebear.com/7.x/bottts-neutral/svg?seed=" <> (avatar_seed || email))
-    calculate :display_label, :string, expr(display_name || email)
-  end
-
   actions do
     defaults [:read]
 
@@ -175,6 +170,16 @@ defmodule Slouch.Accounts.User do
       default false
       public? true
     end
+  end
+
+  calculations do
+    calculate :avatar_url,
+              :string,
+              expr(
+                "https://api.dicebear.com/7.x/bottts-neutral/svg?seed=" <> (avatar_seed || email)
+              )
+
+    calculate :display_label, :string, expr(display_name || email)
   end
 
   identities do

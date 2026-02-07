@@ -21,7 +21,7 @@ defmodule SlouchWeb.ChatLiveTest do
       {:ok, view, html} = live(conn, ~p"/chat")
 
       assert html =~ "SLOUCH"
-      assert html =~ "Select a channel to start chatting"
+      assert html =~ "Select a channel or conversation to start chatting"
       assert has_element?(view, "a", "general")
     end
   end
@@ -185,7 +185,9 @@ defmodule SlouchWeb.ChatLiveTest do
       {:ok, view, _html} = live(conn, ~p"/chat/#{channel.name}")
 
       view
-      |> element("button[phx-click='toggle_reaction'][phx-value-message-id='#{message.id}'][phx-value-emoji='👍'][title]")
+      |> element(
+        "button[phx-click='toggle_reaction'][phx-value-message-id='#{message.id}'][phx-value-emoji='👍'][title]"
+      )
       |> render_click()
 
       reactions =
@@ -202,7 +204,8 @@ defmodule SlouchWeb.ChatLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/chat/#{channel.name}")
 
-      selector = "button[phx-click='toggle_reaction'][phx-value-message-id='#{message.id}'][phx-value-emoji='👍'][title]"
+      selector =
+        "button[phx-click='toggle_reaction'][phx-value-message-id='#{message.id}'][phx-value-emoji='👍'][title]"
 
       view |> element(selector) |> render_click()
 
@@ -220,7 +223,11 @@ defmodule SlouchWeb.ChatLiveTest do
   end
 
   describe "navigation" do
-    test "navigating between channels loads correct messages", %{conn: conn, user: user, channel: channel} do
+    test "navigating between channels loads correct messages", %{
+      conn: conn,
+      user: user,
+      channel: channel
+    } do
       create_message(channel, user, %{body: "In general"})
       channel2 = create_channel(%{name: "random"})
       create_message(channel2, user, %{body: "In random"})

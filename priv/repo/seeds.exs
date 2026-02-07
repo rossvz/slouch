@@ -1,5 +1,14 @@
 alias Slouch.Accounts.User
-alias Slouch.Chat.{Channel, Message, Membership, Conversation, ConversationParticipant, DirectMessage}
+
+alias Slouch.Chat.{
+  Channel,
+  Message,
+  Membership,
+  Conversation,
+  ConversationParticipant,
+  DirectMessage
+}
+
 alias Slouch.Bots.Bot
 
 IO.puts("Seeding database...")
@@ -44,7 +53,10 @@ general =
 
 random =
   Channel
-  |> Ash.Changeset.for_create(:create, %{name: "random", topic: "Random stuff and water cooler chat"})
+  |> Ash.Changeset.for_create(:create, %{
+    name: "random",
+    topic: "Random stuff and water cooler chat"
+  })
   |> Ash.create!()
 
 engineering =
@@ -60,7 +72,10 @@ watercooler =
 IO.puts("Created channels: #general, #random, #engineering, #watercooler")
 
 # Create memberships
-for {user, channels} <- [{alice, [general, random, engineering]}, {bob, [general, random, watercooler]}] do
+for {user, channels} <- [
+      {alice, [general, random, engineering]},
+      {bob, [general, random, watercooler]}
+    ] do
   for channel <- channels do
     Membership
     |> Ash.Changeset.for_create(:join, %{channel_id: channel.id}, actor: user)
@@ -72,11 +87,11 @@ IO.puts("Created memberships")
 
 # Create sample messages in #general
 for {user, body} <- [
-  {alice, "Hey everyone! Welcome to Slouch!"},
-  {bob, "Thanks Alice! Excited to be here."},
-  {alice, "Let's build something awesome together."},
-  {bob, "Couldn't agree more!"}
-] do
+      {alice, "Hey everyone! Welcome to Slouch!"},
+      {bob, "Thanks Alice! Excited to be here."},
+      {alice, "Let's build something awesome together."},
+      {bob, "Couldn't agree more!"}
+    ] do
   Message
   |> Ash.Changeset.for_create(:create, %{body: body, channel_id: general.id}, actor: user)
   |> Ash.create!()
@@ -86,9 +101,9 @@ end
 
 # Create sample messages in #random
 for {user, body} <- [
-  {bob, "Anyone seen any good movies lately?"},
-  {alice, "Just watched Inception again. Still holds up!"}
-] do
+      {bob, "Anyone seen any good movies lately?"},
+      {alice, "Just watched Inception again. Still holds up!"}
+    ] do
   Message
   |> Ash.Changeset.for_create(:create, %{body: body, channel_id: random.id}, actor: user)
   |> Ash.create!()
@@ -111,12 +126,14 @@ for user <- [alice, bob] do
 end
 
 for {user, body} <- [
-  {alice, "Hey Bob, want to grab lunch?"},
-  {bob, "Sure! How about noon?"},
-  {alice, "Perfect, see you then!"}
-] do
+      {alice, "Hey Bob, want to grab lunch?"},
+      {bob, "Sure! How about noon?"},
+      {alice, "Perfect, see you then!"}
+    ] do
   DirectMessage
-  |> Ash.Changeset.for_create(:create, %{body: body, conversation_id: conversation.id}, actor: user)
+  |> Ash.Changeset.for_create(:create, %{body: body, conversation_id: conversation.id},
+    actor: user
+  )
   |> Ash.create!()
 
   Process.sleep(10)
@@ -142,7 +159,8 @@ github_bot_user
 Bot
 |> Ash.Changeset.for_create(:create, %{
   name: "GithubIssueBot",
-  description: "Creates GitHub issues when mentioned. Usage: @GithubIssueBot create issue: Your title here",
+  description:
+    "Creates GitHub issues when mentioned. Usage: @GithubIssueBot create issue: Your title here",
   handler_module: "Elixir.Slouch.Bots.Handlers.GithubIssueBot",
   is_active: true,
   user_id: github_bot_user.id

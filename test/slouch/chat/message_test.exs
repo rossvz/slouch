@@ -43,7 +43,10 @@ defmodule Slouch.Chat.MessageTest do
   end
 
   describe "by_channel" do
-    test "returns messages for a channel excluding thread replies", %{user: user, channel: channel} do
+    test "returns messages for a channel excluding thread replies", %{
+      user: user,
+      channel: channel
+    } do
       create_message(channel, user, %{body: "top-level"})
       parent = create_message(channel, user, %{body: "parent msg"})
       create_message(channel, user, %{body: "reply", parent_message_id: parent.id})

@@ -19,7 +19,10 @@ defmodule Slouch.Chat.ReactionTest do
       assert reaction.user_id == user.id
     end
 
-    test "enforces unique reaction per user per message per emoji", %{user: user, message: message} do
+    test "enforces unique reaction per user per message per emoji", %{
+      user: user,
+      message: message
+    } do
       create_reaction(message, user, "👍")
 
       assert_raise Ash.Error.Invalid, fn ->
@@ -67,7 +70,11 @@ defmodule Slouch.Chat.ReactionTest do
       assert "😂" in emojis
     end
 
-    test "does not return reactions from other messages", %{user: user, channel: channel, message: message} do
+    test "does not return reactions from other messages", %{
+      user: user,
+      channel: channel,
+      message: message
+    } do
       create_reaction(message, user, "👍")
 
       other_message = create_message(channel, user, %{body: "other"})
