@@ -52,6 +52,24 @@ Hooks.MessageInput = {
   }
 }
 
+Hooks.ThemeSelector = {
+  mounted() {
+    this.highlight()
+    this.el.addEventListener("phx:set-theme", () => {
+      requestAnimationFrame(() => this.highlight())
+    })
+    window.addEventListener("storage", (e) => {
+      if (e.key === "phx:theme") this.highlight()
+    })
+  },
+  highlight() {
+    const current = localStorage.getItem("phx:theme") || "system"
+    this.el.querySelectorAll("[data-phx-theme]").forEach((btn) => {
+      btn.classList.toggle("btn-active", btn.dataset.phxTheme === current)
+    })
+  }
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
