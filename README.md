@@ -1,6 +1,7 @@
 # Slouch
 
 A Slack-like team chat application built with Elixir, Phoenix, and the Ash Framework.
+<img width="1002" height="832" alt="Screenshot 2026-02-07 at 1 18 06 PM" src="https://github.com/user-attachments/assets/9bcaf064-15bf-4391-a4af-a626d93f8891" />
 
 ## Features
 
