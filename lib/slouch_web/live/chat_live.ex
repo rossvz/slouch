@@ -31,6 +31,7 @@ defmodule SlouchWeb.ChatLive do
        show_thread: false,
        thread_parent: nil,
        thread_replies: [],
+       thread_type: nil,
        online_users: MapSet.new(),
        view_mode: :none
      )}
@@ -65,6 +66,7 @@ defmodule SlouchWeb.ChatLive do
            show_thread: false,
            thread_parent: nil,
            thread_replies: [],
+           thread_type: nil,
            view_mode: :none,
            page_title: nil
          )}
@@ -111,6 +113,7 @@ defmodule SlouchWeb.ChatLive do
        show_thread: false,
        thread_parent: nil,
        thread_replies: [],
+       thread_type: nil,
        view_mode: :channel,
        page_title: channel && "# #{channel.name}"
      )}
@@ -142,6 +145,7 @@ defmodule SlouchWeb.ChatLive do
            show_thread: false,
            thread_parent: nil,
            thread_replies: [],
+           thread_type: nil,
            view_mode: :dm,
            page_title: other && to_string(other.display_label)
          )}
@@ -187,6 +191,34 @@ defmodule SlouchWeb.ChatLive do
       Slouch.PubSub,
       "chat:#{socket.assigns.channel.id}",
       {:reaction_toggled, message_id}
+    )
+
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_dm_reaction", %{"message-id" => message_id, "emoji" => emoji}, socket) do
+    current_user = socket.assigns.current_user
+
+    existing =
+      Slouch.Chat.DmReaction
+      |> Ash.Query.for_read(:by_direct_message, %{direct_message_id: message_id})
+      |> Ash.read!(actor: current_user)
+      |> Enum.find(&(&1.user_id == current_user.id && &1.emoji == emoji))
+
+    if existing do
+      Ash.destroy!(existing, actor: current_user)
+    else
+      Slouch.Chat.DmReaction
+      |> Ash.Changeset.for_create(:react, %{emoji: emoji, direct_message_id: message_id},
+        actor: current_user
+      )
+      |> Ash.create!()
+    end
+
+    Phoenix.PubSub.broadcast(
+      Slouch.PubSub,
+      "dm:#{socket.assigns.conversation.id}",
+      {:dm_reaction_toggled, message_id}
     )
 
     {:noreply, socket}
@@ -323,11 +355,22 @@ defmodule SlouchWeb.ChatLive do
       |> Ash.Query.for_read(:thread_replies, %{parent_message_id: message_id})
       |> Ash.read!()
 
-    {:noreply, assign(socket, show_thread: true, thread_parent: parent, thread_replies: replies)}
+    {:noreply, assign(socket, show_thread: true, thread_parent: parent, thread_replies: replies, thread_type: :channel)}
+  end
+
+  def handle_event("open_dm_thread", %{"message-id" => message_id}, socket) do
+    parent = Ash.get!(Slouch.Chat.DirectMessage, message_id, load: [user: [:avatar_url, :display_label]])
+
+    replies =
+      Slouch.Chat.DirectMessage
+      |> Ash.Query.for_read(:thread_replies, %{parent_message_id: message_id})
+      |> Ash.read!()
+
+    {:noreply, assign(socket, show_thread: true, thread_parent: parent, thread_replies: replies, thread_type: :dm)}
   end
 
   def handle_event("close_thread", _, socket) do
-    {:noreply, assign(socket, show_thread: false, thread_parent: nil, thread_replies: [])}
+    {:noreply, assign(socket, show_thread: false, thread_parent: nil, thread_replies: [], thread_type: nil)}
   end
 
   def handle_event("send_reply", %{"body" => body}, socket) do
@@ -336,28 +379,59 @@ defmodule SlouchWeb.ChatLive do
     if body == "" do
       {:noreply, socket}
     else
-      reply =
-        Slouch.Chat.Message
-        |> Ash.Changeset.for_create(
-          :create,
-          %{
-            body: body,
-            channel_id: socket.assigns.channel.id,
-            parent_message_id: socket.assigns.thread_parent.id
-          },
-          actor: socket.assigns.current_user
-        )
-        |> Ash.create!()
-        |> Ash.load!([user: [:avatar_url, :display_label]])
-
-      Phoenix.PubSub.broadcast(
-        Slouch.PubSub,
-        "chat:#{socket.assigns.channel.id}",
-        {:new_reply, socket.assigns.thread_parent.id, reply}
-      )
-
-      {:noreply, assign(socket, thread_replies: socket.assigns.thread_replies ++ [reply])}
+      case socket.assigns.thread_type do
+        :channel -> send_channel_reply(body, socket)
+        :dm -> send_dm_reply(body, socket)
+      end
     end
+  end
+
+  defp send_channel_reply(body, socket) do
+    reply =
+      Slouch.Chat.Message
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          body: body,
+          channel_id: socket.assigns.channel.id,
+          parent_message_id: socket.assigns.thread_parent.id
+        },
+        actor: socket.assigns.current_user
+      )
+      |> Ash.create!()
+      |> Ash.load!([user: [:avatar_url, :display_label]])
+
+    Phoenix.PubSub.broadcast(
+      Slouch.PubSub,
+      "chat:#{socket.assigns.channel.id}",
+      {:new_reply, socket.assigns.thread_parent.id, reply}
+    )
+
+    {:noreply, assign(socket, thread_replies: socket.assigns.thread_replies ++ [reply])}
+  end
+
+  defp send_dm_reply(body, socket) do
+    reply =
+      Slouch.Chat.DirectMessage
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          body: body,
+          conversation_id: socket.assigns.conversation.id,
+          parent_message_id: socket.assigns.thread_parent.id
+        },
+        actor: socket.assigns.current_user
+      )
+      |> Ash.create!()
+      |> Ash.load!([user: [:avatar_url, :display_label]])
+
+    Phoenix.PubSub.broadcast(
+      Slouch.PubSub,
+      "dm:#{socket.assigns.conversation.id}",
+      {:new_dm_reply, socket.assigns.thread_parent.id, reply}
+    )
+
+    {:noreply, assign(socket, thread_replies: socket.assigns.thread_replies ++ [reply])}
   end
 
   @impl true
@@ -378,7 +452,7 @@ defmodule SlouchWeb.ChatLive do
     if MapSet.member?(existing_ids, dm.id) do
       {:noreply, socket}
     else
-      dm = Ash.load!(dm, [user: [:avatar_url, :display_label]])
+      dm = Ash.load!(dm, [:reply_count, user: [:avatar_url, :display_label], reactions: [:user]])
       {:noreply, assign(socket, dm_messages: socket.assigns.dm_messages ++ [dm])}
     end
   end
@@ -394,6 +468,19 @@ defmodule SlouchWeb.ChatLive do
       end)
 
     {:noreply, assign(socket, messages: messages)}
+  end
+
+  def handle_info({:dm_reaction_toggled, message_id}, socket) do
+    dm_messages =
+      Enum.map(socket.assigns.dm_messages, fn msg ->
+        if msg.id == message_id do
+          Ash.load!(msg, [reactions: [:user]], actor: socket.assigns.current_user)
+        else
+          msg
+        end
+      end)
+
+    {:noreply, assign(socket, dm_messages: dm_messages)}
   end
 
   def handle_info({:new_reply, parent_message_id, reply}, socket) do
@@ -418,6 +505,30 @@ defmodule SlouchWeb.ChatLive do
       end
 
     {:noreply, assign(socket, messages: messages)}
+  end
+
+  def handle_info({:new_dm_reply, parent_message_id, reply}, socket) do
+    dm_messages =
+      Enum.map(socket.assigns.dm_messages, fn msg ->
+        if msg.id == parent_message_id do
+          %{msg | reply_count: (msg.reply_count || 0) + 1}
+        else
+          msg
+        end
+      end)
+
+    socket =
+      if socket.assigns.show_thread && socket.assigns.thread_parent.id == parent_message_id do
+        if reply.user_id != socket.assigns.current_user.id do
+          assign(socket, thread_replies: socket.assigns.thread_replies ++ [reply])
+        else
+          socket
+        end
+      else
+        socket
+      end
+
+    {:noreply, assign(socket, dm_messages: dm_messages)}
   end
 
   def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
@@ -524,14 +635,12 @@ defmodule SlouchWeb.ChatLive do
     end)
   end
 
-  defp dm_messages_with_grouping(messages), do: messages_with_grouping(messages)
-
   @impl true
   def render(assigns) do
     assigns =
       assigns
       |> assign(:grouped_messages, messages_with_grouping(assigns.messages))
-      |> assign(:grouped_dm_messages, dm_messages_with_grouping(assigns.dm_messages))
+      |> assign(:grouped_dm_messages, messages_with_grouping(assigns.dm_messages))
 
     ~H"""
     <div class="flex h-screen overflow-hidden">
@@ -680,48 +789,12 @@ defmodule SlouchWeb.ChatLive do
                   <p :if={!@channel.topic} class="text-sm opacity-50">Send a message to get the conversation started.</p>
                 </div>
               <% else %>
-                <div :for={{msg, show_date, compact} <- @grouped_messages} id={"msg-#{msg.id}"}>
-                  <div :if={show_date} class="flex items-center gap-3 my-4">
-                    <div class="flex-1 border-t border-base-300"></div>
-                    <span class="text-xs font-medium opacity-50 whitespace-nowrap">
-                      {format_date_label(DateTime.to_date(msg.inserted_at))}
-                    </span>
-                    <div class="flex-1 border-t border-base-300"></div>
-                  </div>
-
-                  <%= if compact do %>
-                    <div class="message-row group flex items-start pl-12 pr-2 py-0.5 -mx-2 rounded hover:bg-base-200/50 transition-colors relative">
-                      <span class="compact-time text-xs opacity-0 absolute left-1 top-1 w-10 text-right tabular-nums">
-                        {format_time(msg.inserted_at)}
-                      </span>
-                      <div class="flex-1 min-w-0">
-                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
-                        <.message_extras msg={msg} current_user_id={@current_user.id} />
-                      </div>
-                      <.message_actions msg={msg} />
-                    </div>
-                  <% else %>
-                    <div class="message-row group flex gap-3 pr-2 py-1.5 -mx-2 px-2 rounded hover:bg-base-200/50 transition-colors relative mt-3 first:mt-0">
-                      <div class="flex-shrink-0 mt-0.5">
-                        <div class="avatar">
-                          <div class="w-9 h-9 rounded-full">
-                            <img src={msg.user.avatar_url} alt={user_display(msg)} />
-                          </div>
-                        </div>
-                      </div>
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-baseline gap-2">
-                          <span class="font-semibold text-sm hover:underline cursor-pointer">{user_display(msg)}</span>
-                          <.bot_badge :if={msg.user.is_bot} />
-                          <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
-                        </div>
-                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
-                        <.message_extras msg={msg} current_user_id={@current_user.id} />
-                      </div>
-                      <.message_actions msg={msg} />
-                    </div>
-                  <% end %>
-                </div>
+                <.message_list
+                  grouped_messages={@grouped_messages}
+                  current_user_id={@current_user.id}
+                  msg_type={:channel}
+                  id_prefix="msg"
+                />
               <% end %>
             </div>
 
@@ -772,43 +845,12 @@ defmodule SlouchWeb.ChatLive do
                   <p class="text-sm opacity-50">This is the beginning of your conversation.</p>
                 </div>
               <% else %>
-                <div :for={{msg, show_date, compact} <- @grouped_dm_messages} id={"dm-#{msg.id}"}>
-                  <div :if={show_date} class="flex items-center gap-3 my-4">
-                    <div class="flex-1 border-t border-base-300"></div>
-                    <span class="text-xs font-medium opacity-50 whitespace-nowrap">
-                      {format_date_label(DateTime.to_date(msg.inserted_at))}
-                    </span>
-                    <div class="flex-1 border-t border-base-300"></div>
-                  </div>
-
-                  <%= if compact do %>
-                    <div class="group flex items-start pl-12 pr-2 py-0.5 -mx-2 rounded hover:bg-base-200/50 transition-colors relative">
-                      <span class="compact-time text-xs opacity-0 absolute left-1 top-1 w-10 text-right tabular-nums">
-                        {format_time(msg.inserted_at)}
-                      </span>
-                      <div class="flex-1 min-w-0">
-                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
-                      </div>
-                    </div>
-                  <% else %>
-                    <div class="group flex gap-3 pr-2 py-1.5 -mx-2 px-2 rounded hover:bg-base-200/50 transition-colors relative mt-3 first:mt-0">
-                      <div class="flex-shrink-0 mt-0.5">
-                        <div class="avatar">
-                          <div class="w-9 h-9 rounded-full">
-                            <img src={msg.user.avatar_url} alt={user_display(msg)} />
-                          </div>
-                        </div>
-                      </div>
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-baseline gap-2">
-                          <span class="font-semibold text-sm">{user_display(msg)}</span>
-                          <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
-                        </div>
-                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
-                      </div>
-                    </div>
-                  <% end %>
-                </div>
+                <.message_list
+                  grouped_messages={@grouped_dm_messages}
+                  current_user_id={@current_user.id}
+                  msg_type={:dm}
+                  id_prefix="dm"
+                />
               <% end %>
             </div>
 
@@ -864,7 +906,7 @@ defmodule SlouchWeb.ChatLive do
             <div class="min-w-0">
               <div class="flex items-baseline gap-2">
                 <span class="font-semibold text-sm">{user_display(@thread_parent)}</span>
-                <.bot_badge :if={@thread_parent.user.is_bot} />
+                <.bot_badge :if={Map.get(@thread_parent.user, :is_bot, false)} />
                 <span class="text-xs opacity-40">{format_time(@thread_parent.inserted_at)}</span>
               </div>
               <p class="text-sm mt-0.5 whitespace-pre-wrap">{@thread_parent.body}</p>
@@ -890,7 +932,7 @@ defmodule SlouchWeb.ChatLive do
             <div class="min-w-0">
               <div class="flex items-baseline gap-2">
                 <span class="font-semibold text-sm">{user_display(reply)}</span>
-                <.bot_badge :if={reply.user.is_bot} />
+                <.bot_badge :if={Map.get(reply.user, :is_bot, false)} />
                 <span class="text-xs opacity-40">{format_time(reply.inserted_at)}</span>
               </div>
               <p class="text-sm mt-0.5 whitespace-pre-wrap">{reply.body}</p>
@@ -982,6 +1024,53 @@ defmodule SlouchWeb.ChatLive do
     """
   end
 
+  defp message_list(assigns) do
+    ~H"""
+    <div :for={{msg, show_date, compact} <- @grouped_messages} id={"#{@id_prefix}-#{msg.id}"}>
+      <div :if={show_date} class="flex items-center gap-3 my-4">
+        <div class="flex-1 border-t border-base-300"></div>
+        <span class="text-xs font-medium opacity-50 whitespace-nowrap">
+          {format_date_label(DateTime.to_date(msg.inserted_at))}
+        </span>
+        <div class="flex-1 border-t border-base-300"></div>
+      </div>
+
+      <%= if compact do %>
+        <div class="message-row group flex items-start pl-12 pr-2 py-0.5 -mx-2 rounded hover:bg-base-200/50 transition-colors relative">
+          <span class="compact-time text-xs opacity-0 absolute left-1 top-1 w-10 text-right tabular-nums">
+            {format_time(msg.inserted_at)}
+          </span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
+            <.message_extras msg={msg} current_user_id={@current_user_id} msg_type={@msg_type} />
+          </div>
+          <.message_actions msg={msg} msg_type={@msg_type} />
+        </div>
+      <% else %>
+        <div class="message-row group flex gap-3 pr-2 py-1.5 -mx-2 px-2 rounded hover:bg-base-200/50 transition-colors relative mt-3 first:mt-0">
+          <div class="flex-shrink-0 mt-0.5">
+            <div class="avatar">
+              <div class="w-9 h-9 rounded-full">
+                <img src={msg.user.avatar_url} alt={user_display(msg)} />
+              </div>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2">
+              <span class="font-semibold text-sm hover:underline cursor-pointer">{user_display(msg)}</span>
+              <.bot_badge :if={Map.get(msg.user, :is_bot, false)} />
+              <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
+            </div>
+            <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
+            <.message_extras msg={msg} current_user_id={@current_user_id} msg_type={@msg_type} />
+          </div>
+          <.message_actions msg={msg} msg_type={@msg_type} />
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
   defp bot_badge(assigns) do
     ~H"""
     <span class="badge badge-xs badge-primary font-semibold tracking-wide">BOT</span>
@@ -989,11 +1078,15 @@ defmodule SlouchWeb.ChatLive do
   end
 
   defp message_extras(assigns) do
+    reaction_event = if assigns.msg_type == :dm, do: "toggle_dm_reaction", else: "toggle_reaction"
+    thread_event = if assigns.msg_type == :dm, do: "open_dm_thread", else: "open_thread"
+    assigns = assign(assigns, reaction_event: reaction_event, thread_event: thread_event)
+
     ~H"""
     <div :if={@msg.reactions != []} class="flex items-center gap-1 mt-1 flex-wrap">
       <button
         :for={reaction_group <- group_reactions(@msg.reactions, @current_user_id)}
-        phx-click="toggle_reaction"
+        phx-click={@reaction_event}
         phx-value-message-id={@msg.id}
         phx-value-emoji={reaction_group.emoji}
         class={[
@@ -1007,7 +1100,7 @@ defmodule SlouchWeb.ChatLive do
     </div>
     <div :if={@msg.reply_count > 0} class="mt-1">
       <button
-        phx-click="open_thread"
+        phx-click={@thread_event}
         phx-value-message-id={@msg.id}
         class="text-xs text-primary hover:underline cursor-pointer"
       >
@@ -1018,11 +1111,15 @@ defmodule SlouchWeb.ChatLive do
   end
 
   defp message_actions(assigns) do
+    reaction_event = if assigns.msg_type == :dm, do: "toggle_dm_reaction", else: "toggle_reaction"
+    thread_event = if assigns.msg_type == :dm, do: "open_dm_thread", else: "open_thread"
+    assigns = assign(assigns, reaction_event: reaction_event, thread_event: thread_event)
+
     ~H"""
     <div class="message-actions opacity-0 transition-opacity absolute -top-3 right-2 flex items-center bg-base-100 border border-base-300 rounded-full shadow-sm px-1 h-8">
       <button
         :for={emoji <- ~w(👍 😂 ✅)}
-        phx-click="toggle_reaction"
+        phx-click={@reaction_event}
         phx-value-message-id={@msg.id}
         phx-value-emoji={emoji}
         class="hover:bg-base-200 rounded-full w-7 h-7 flex items-center justify-center text-base transition-colors"
@@ -1046,7 +1143,7 @@ defmodule SlouchWeb.ChatLive do
           <div class="flex gap-1">
             <button
               :for={emoji <- ~w(👍 ❤️ 😂 🎉 🤔 👀 🚀 ✅)}
-              phx-click="toggle_reaction"
+              phx-click={@reaction_event}
               phx-value-message-id={@msg.id}
               phx-value-emoji={emoji}
               class="btn btn-ghost btn-sm text-lg hover:bg-base-300"
@@ -1058,7 +1155,7 @@ defmodule SlouchWeb.ChatLive do
       </div>
       <div class="w-px h-4 bg-base-300 mx-0.5"></div>
       <button
-        phx-click="open_thread"
+        phx-click={@thread_event}
         phx-value-message-id={@msg.id}
         class="hover:bg-base-200 rounded-full w-7 h-7 flex items-center justify-center transition-colors"
         title="Reply in thread"

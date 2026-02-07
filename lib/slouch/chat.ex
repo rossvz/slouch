@@ -13,5 +13,6 @@ defmodule Slouch.Chat do
     resource Slouch.Chat.Conversation
     resource Slouch.Chat.ConversationParticipant
     resource Slouch.Chat.DirectMessage
+    resource Slouch.Chat.DmReaction
   end
 end
