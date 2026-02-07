@@ -117,35 +117,38 @@ defmodule SlouchWeb.ChatLive do
   end
 
   defp handle_dm_params(conversation_id, socket) do
-    conversation =
-      Ash.get!(Slouch.Chat.Conversation, conversation_id,
-        load: [participants: [user: [:avatar_url, :display_label]]]
-      )
+    case Ash.get(Slouch.Chat.Conversation, conversation_id,
+           load: [participants: [user: [:avatar_url, :display_label]]]
+         ) do
+      {:ok, conversation} ->
+        if connected?(socket) do
+          Phoenix.PubSub.subscribe(Slouch.PubSub, "dm:#{conversation.id}")
+        end
 
-    if connected?(socket) do
-      Phoenix.PubSub.subscribe(Slouch.PubSub, "dm:#{conversation.id}")
+        dm_messages =
+          Slouch.Chat.DirectMessage
+          |> Ash.Query.for_read(:by_conversation, %{conversation_id: conversation.id})
+          |> Ash.read!(actor: socket.assigns.current_user)
+
+        other = other_participant(conversation, socket.assigns.current_user.id)
+
+        {:noreply,
+         assign(socket,
+           channel: nil,
+           conversation: conversation,
+           messages: [],
+           dm_messages: dm_messages,
+           online_users: MapSet.new(),
+           show_thread: false,
+           thread_parent: nil,
+           thread_replies: [],
+           view_mode: :dm,
+           page_title: other && to_string(other.display_label)
+         )}
+
+      {:error, _} ->
+        {:noreply, push_navigate(socket, to: ~p"/")}
     end
-
-    dm_messages =
-      Slouch.Chat.DirectMessage
-      |> Ash.Query.for_read(:by_conversation, %{conversation_id: conversation.id})
-      |> Ash.read!(actor: socket.assigns.current_user)
-
-    other = other_participant(conversation, socket.assigns.current_user.id)
-
-    {:noreply,
-     assign(socket,
-       channel: nil,
-       conversation: conversation,
-       messages: [],
-       dm_messages: dm_messages,
-       online_users: MapSet.new(),
-       show_thread: false,
-       thread_parent: nil,
-       thread_replies: [],
-       view_mode: :dm,
-       page_title: other && to_string(other.display_label)
-     )}
   end
 
   defp unsubscribe_current(socket, old_channel, old_conversation) do
@@ -502,17 +505,7 @@ defmodule SlouchWeb.ChatLive do
     end)
   end
 
-  defp dm_messages_with_grouping(messages) do
-    messages
-    |> Enum.with_index()
-    |> Enum.map(fn {msg, idx} ->
-      prev = if idx > 0, do: Enum.at(messages, idx - 1)
-      show_date = prev == nil || DateTime.to_date(msg.inserted_at) != DateTime.to_date(prev.inserted_at)
-      compact = prev != nil && !show_date && msg.user_id == prev.user_id &&
-        DateTime.diff(msg.inserted_at, prev.inserted_at, :second) < 300
-      {msg, show_date, compact}
-    end)
-  end
+  defp dm_messages_with_grouping(messages), do: messages_with_grouping(messages)
 
   @impl true
   def render(assigns) do
