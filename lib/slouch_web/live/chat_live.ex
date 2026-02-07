@@ -932,6 +932,27 @@ defmodule SlouchWeb.ChatLive do
             <input type="hidden" name="status_emoji" value={@current_user.status_emoji} />
           </div>
 
+          <div class="form-control mb-3" id="theme-selector" phx-hook="ThemeSelector">
+            <label class="label"><span class="label-text">Theme</span></label>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="system" class="btn btn-sm">
+                <.icon name="hero-computer-desktop-micro" class="size-4" /> System
+              </button>
+              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="light" class="btn btn-sm">
+                <.icon name="hero-sun-micro" class="size-4" /> Light
+              </button>
+              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="dark" class="btn btn-sm">
+                <.icon name="hero-moon-micro" class="size-4" /> Dark
+              </button>
+              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="catppuccin-latte" class="btn btn-sm">
+                <.icon name="hero-sun-micro" class="size-4" /> Catppuccin Latte
+              </button>
+              <button type="button" phx-click={JS.dispatch("phx:set-theme")} data-phx-theme="catppuccin-mocha" class="btn btn-sm">
+                <.icon name="hero-moon-micro" class="size-4" /> Catppuccin Mocha
+              </button>
+            </div>
+          </div>
+
           <div class="modal-action">
             <button type="button" onclick="document.getElementById('profile-modal').close()" class="btn">Cancel</button>
             <button type="submit" class="btn btn-primary">Save</button>
