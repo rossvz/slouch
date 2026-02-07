@@ -54,7 +54,7 @@ config :spark,
 config :slouch,
   ecto_repos: [Slouch.Repo],
   generators: [timestamp_type: :utc_datetime],
-  ash_domains: [Slouch.Accounts, Slouch.Chat],
+  ash_domains: [Slouch.Accounts, Slouch.Chat, Slouch.Bots],
   ash_authentication: [return_error_on_invalid_magic_link_token?: true]
 
 # Configure the endpoint

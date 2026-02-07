@@ -164,6 +164,12 @@ defmodule Slouch.Accounts.User do
       allow_nil? true
       public? true
     end
+
+    attribute :is_bot, :boolean do
+      allow_nil? false
+      default false
+      public? true
+    end
   end
 
   identities do
