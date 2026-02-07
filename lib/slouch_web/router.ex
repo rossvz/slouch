@@ -28,6 +28,7 @@ defmodule SlouchWeb.Router do
       live "/", ChatLive, :index
       live "/chat", ChatLive, :index
       live "/chat/:channel_name", ChatLive, :show
+      live "/dm/:conversation_id", ChatLive, :dm
     end
   end
 

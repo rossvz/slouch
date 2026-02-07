@@ -10,49 +10,79 @@ defmodule SlouchWeb.ChatLive do
     channels = Slouch.Chat.Channel |> Ash.read!()
     current_user = Ash.load!(socket.assigns.current_user, [:avatar_url, :display_label])
 
+    conversations = load_conversations(current_user)
+
+    all_users =
+      Slouch.Accounts.User
+      |> Ash.read!()
+      |> Ash.load!([:avatar_url, :display_label])
+      |> Enum.reject(&(&1.id == current_user.id))
+
     {:ok,
      assign(socket,
        current_user: current_user,
        channels: channels,
        channel: nil,
+       conversation: nil,
+       conversations: conversations,
+       all_users: all_users,
        messages: [],
+       dm_messages: [],
        show_thread: false,
        thread_parent: nil,
        thread_replies: [],
-       online_users: MapSet.new()
+       online_users: MapSet.new(),
+       view_mode: :none
      )}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
     channel_name = params["channel_name"]
-    channels = socket.assigns.channels
+    conversation_id = params["conversation_id"]
     old_channel = socket.assigns.channel
-
-    channel =
-      if channel_name do
-        Enum.find(channels, &(&1.name == channel_name))
-      else
-        nil
-      end
+    old_conversation = socket.assigns.conversation
 
     if connected?(socket) do
-      if old_channel && old_channel.id != (channel && channel.id) do
-        Phoenix.PubSub.unsubscribe(Slouch.PubSub, "chat:#{old_channel.id}")
-        Presence.untrack(self(), "presence:#{old_channel.id}", socket.assigns.current_user.id)
-        Phoenix.PubSub.unsubscribe(Slouch.PubSub, "presence:#{old_channel.id}")
-      end
+      unsubscribe_current(socket, old_channel, old_conversation)
+    end
 
-      if channel do
-        Phoenix.PubSub.subscribe(Slouch.PubSub, "chat:#{channel.id}")
-        Phoenix.PubSub.subscribe(Slouch.PubSub, "presence:#{channel.id}")
+    cond do
+      conversation_id ->
+        handle_dm_params(conversation_id, socket)
 
-        Presence.track(self(), "presence:#{channel.id}", socket.assigns.current_user.id, %{
-          email: to_string(socket.assigns.current_user.email),
-          display_label: to_string(socket.assigns.current_user.display_label),
-          joined_at: System.system_time(:second)
-        })
-      end
+      channel_name ->
+        handle_channel_params(channel_name, socket)
+
+      true ->
+        {:noreply,
+         assign(socket,
+           channel: nil,
+           conversation: nil,
+           messages: [],
+           dm_messages: [],
+           online_users: MapSet.new(),
+           show_thread: false,
+           thread_parent: nil,
+           thread_replies: [],
+           view_mode: :none,
+           page_title: nil
+         )}
+    end
+  end
+
+  defp handle_channel_params(channel_name, socket) do
+    channel = Enum.find(socket.assigns.channels, &(&1.name == channel_name))
+
+    if connected?(socket) && channel do
+      Phoenix.PubSub.subscribe(Slouch.PubSub, "chat:#{channel.id}")
+      Phoenix.PubSub.subscribe(Slouch.PubSub, "presence:#{channel.id}")
+
+      Presence.track(self(), "presence:#{channel.id}", socket.assigns.current_user.id, %{
+        email: to_string(socket.assigns.current_user.email),
+        display_label: to_string(socket.assigns.current_user.display_label),
+        joined_at: System.system_time(:second)
+      })
     end
 
     messages =
@@ -66,10 +96,7 @@ defmodule SlouchWeb.ChatLive do
 
     online_users =
       if channel && connected?(socket) do
-        "presence:#{channel.id}"
-        |> Presence.list()
-        |> Map.keys()
-        |> MapSet.new()
+        "presence:#{channel.id}" |> Presence.list() |> Map.keys() |> MapSet.new()
       else
         MapSet.new()
       end
@@ -77,13 +104,63 @@ defmodule SlouchWeb.ChatLive do
     {:noreply,
      assign(socket,
        channel: channel,
+       conversation: nil,
        messages: messages,
+       dm_messages: [],
        online_users: online_users,
        show_thread: false,
        thread_parent: nil,
        thread_replies: [],
+       view_mode: :channel,
        page_title: channel && "# #{channel.name}"
      )}
+  end
+
+  defp handle_dm_params(conversation_id, socket) do
+    case Ash.get(Slouch.Chat.Conversation, conversation_id,
+           load: [participants: [user: [:avatar_url, :display_label]]]
+         ) do
+      {:ok, conversation} ->
+        if connected?(socket) do
+          Phoenix.PubSub.subscribe(Slouch.PubSub, "dm:#{conversation.id}")
+        end
+
+        dm_messages =
+          Slouch.Chat.DirectMessage
+          |> Ash.Query.for_read(:by_conversation, %{conversation_id: conversation.id})
+          |> Ash.read!(actor: socket.assigns.current_user)
+
+        other = other_participant(conversation, socket.assigns.current_user.id)
+
+        {:noreply,
+         assign(socket,
+           channel: nil,
+           conversation: conversation,
+           messages: [],
+           dm_messages: dm_messages,
+           online_users: MapSet.new(),
+           show_thread: false,
+           thread_parent: nil,
+           thread_replies: [],
+           view_mode: :dm,
+           page_title: other && to_string(other.display_label)
+         )}
+
+      {:error, _} ->
+        {:noreply, push_navigate(socket, to: ~p"/")}
+    end
+  end
+
+  defp unsubscribe_current(socket, old_channel, old_conversation) do
+    if old_channel do
+      Phoenix.PubSub.unsubscribe(Slouch.PubSub, "chat:#{old_channel.id}")
+      Presence.untrack(self(), "presence:#{old_channel.id}", socket.assigns.current_user.id)
+      Phoenix.PubSub.unsubscribe(Slouch.PubSub, "presence:#{old_channel.id}")
+    end
+
+    if old_conversation do
+      Phoenix.PubSub.unsubscribe(Slouch.PubSub, "dm:#{old_conversation.id}")
+    end
   end
 
   @impl true
@@ -142,6 +219,45 @@ defmodule SlouchWeb.ChatLive do
 
       {:noreply, socket}
     end
+  end
+
+  def handle_event("send_dm", %{"body" => body}, socket) do
+    body = String.trim(body)
+
+    if body == "" do
+      {:noreply, socket}
+    else
+      conversation = socket.assigns.conversation
+      current_user = socket.assigns.current_user
+
+      dm =
+        Slouch.Chat.DirectMessage
+        |> Ash.Changeset.for_create(:create, %{body: body, conversation_id: conversation.id},
+          actor: current_user
+        )
+        |> Ash.create!()
+
+      dm = Ash.load!(dm, user: [:avatar_url, :display_label])
+
+      Phoenix.PubSub.broadcast(
+        Slouch.PubSub,
+        "dm:#{conversation.id}",
+        {:new_dm, dm}
+      )
+
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("start_dm", %{"user-id" => other_user_id}, socket) do
+    current_user = socket.assigns.current_user
+    conversation = find_or_create_conversation(current_user.id, other_user_id)
+    conversations = load_conversations(current_user)
+
+    {:noreply,
+     socket
+     |> assign(conversations: conversations)
+     |> push_navigate(to: ~p"/dm/#{conversation.id}")}
   end
 
   def handle_event("create_channel", %{"name" => name}, socket) do
@@ -237,6 +353,17 @@ defmodule SlouchWeb.ChatLive do
     end
   end
 
+  def handle_info({:new_dm, dm}, socket) do
+    existing_ids = MapSet.new(socket.assigns.dm_messages, & &1.id)
+
+    if MapSet.member?(existing_ids, dm.id) do
+      {:noreply, socket}
+    else
+      dm = Ash.load!(dm, [user: [:avatar_url, :display_label]])
+      {:noreply, assign(socket, dm_messages: socket.assigns.dm_messages ++ [dm])}
+    end
+  end
+
   def handle_info({:reaction_toggled, message_id}, socket) do
     messages =
       Enum.map(socket.assigns.messages, fn msg ->
@@ -288,6 +415,49 @@ defmodule SlouchWeb.ChatLive do
     {:noreply, assign(socket, online_users: online_users)}
   end
 
+  defp load_conversations(user) do
+    Slouch.Chat.Conversation
+    |> Ash.Query.for_read(:my_conversations, %{user_id: user.id})
+    |> Ash.read!()
+  end
+
+  defp find_or_create_conversation(user_id_1, user_id_2) do
+    existing =
+      Slouch.Chat.Conversation
+      |> Ash.Query.for_read(:my_conversations, %{user_id: user_id_1})
+      |> Ash.read!()
+      |> Enum.find(fn conv ->
+        participant_ids = Enum.map(conv.participants, & &1.user_id) |> MapSet.new()
+        MapSet.member?(participant_ids, user_id_2) && MapSet.size(participant_ids) == 2
+      end)
+
+    if existing do
+      existing
+    else
+      conversation =
+        Slouch.Chat.Conversation
+        |> Ash.Changeset.for_create(:create, %{})
+        |> Ash.create!()
+
+      for uid <- [user_id_1, user_id_2] do
+        Slouch.Chat.ConversationParticipant
+        |> Ash.Changeset.for_create(:create, %{conversation_id: conversation.id, user_id: uid})
+        |> Ash.create!()
+      end
+
+      Ash.load!(conversation, [participants: [user: [:avatar_url, :display_label]]])
+    end
+  end
+
+  defp other_participant(conversation, current_user_id) do
+    conversation.participants
+    |> Enum.find(&(&1.user_id != current_user_id))
+    |> case do
+      nil -> nil
+      participant -> participant.user
+    end
+  end
+
   defp format_time(datetime) do
     Calendar.strftime(datetime, "%-I:%M %p")
   end
@@ -335,22 +505,26 @@ defmodule SlouchWeb.ChatLive do
     end)
   end
 
+  defp dm_messages_with_grouping(messages), do: messages_with_grouping(messages)
+
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :grouped_messages, messages_with_grouping(assigns.messages))
+    assigns =
+      assigns
+      |> assign(:grouped_messages, messages_with_grouping(assigns.messages))
+      |> assign(:grouped_dm_messages, dm_messages_with_grouping(assigns.dm_messages))
 
     ~H"""
     <div class="flex h-screen overflow-hidden">
-      <%!-- Sidebar --%>
       <aside class="w-64 bg-base-300 flex flex-col flex-shrink-0">
         <div class="p-4 font-bold text-xl tracking-tight border-b border-base-content/10">
           SLOUCH
         </div>
 
-        <div class="px-3 mt-3 mb-1 text-xs font-semibold uppercase tracking-wider opacity-50">
-          Channels
-        </div>
         <nav class="flex-1 overflow-y-auto px-1">
+          <div class="px-2 mt-3 mb-1 text-xs font-semibold uppercase tracking-wider opacity-50">
+            Channels
+          </div>
           <ul>
             <li :for={ch <- @channels}>
               <.link
@@ -380,9 +554,60 @@ defmodule SlouchWeb.ChatLive do
               />
             </div>
           </form>
+
+          <div class="px-2 mt-5 mb-1 text-xs font-semibold uppercase tracking-wider opacity-50">
+            Direct Messages
+          </div>
+          <ul>
+            <li :for={conv <- @conversations}>
+              <% other = other_participant(conv, @current_user.id) %>
+              <.link
+                :if={other}
+                navigate={~p"/dm/#{conv.id}"}
+                class={[
+                  "flex items-center gap-2 px-3 py-1.5 rounded text-sm transition-colors",
+                  if(@conversation && @conversation.id == conv.id,
+                    do: "bg-base-100 font-bold",
+                    else: "hover:bg-base-100/50 opacity-80 hover:opacity-100"
+                  )
+                ]}
+              >
+                <div class="avatar">
+                  <div class="w-5 h-5 rounded-full">
+                    <img src={other.avatar_url} alt={to_string(other.display_label)} />
+                  </div>
+                </div>
+                <span class="truncate">{to_string(other.display_label)}</span>
+              </.link>
+            </li>
+          </ul>
+
+          <div class="mt-2 px-2">
+            <div class="dropdown dropdown-bottom w-full">
+              <div
+                tabindex="0"
+                role="button"
+                class="flex items-center gap-1 text-sm opacity-60 hover:opacity-100 transition-opacity cursor-pointer"
+              >
+                <span class="text-lg leading-none">+</span>
+                <span>New message</span>
+              </div>
+              <ul tabindex="0" class="dropdown-content z-50 menu p-2 shadow-lg bg-base-200 rounded-box w-56 mt-1">
+                <li :for={u <- @all_users}>
+                  <button phx-click="start_dm" phx-value-user-id={u.id} class="flex items-center gap-2">
+                    <div class="avatar">
+                      <div class="w-6 h-6 rounded-full">
+                        <img src={u.avatar_url} alt={to_string(u.display_label)} />
+                      </div>
+                    </div>
+                    <span class="truncate">{to_string(u.display_label)}</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
         </nav>
 
-        <%!-- User panel at bottom --%>
         <div class="p-3 border-t border-base-content/10">
           <div class="flex items-center gap-3">
             <div class="relative cursor-pointer" onclick="document.getElementById('profile-modal').showModal()">
@@ -406,119 +631,199 @@ defmodule SlouchWeb.ChatLive do
         </div>
       </aside>
 
-      <%!-- Main chat area --%>
       <main class="flex-1 flex flex-col min-w-0">
-        <%= if @channel do %>
-          <%!-- Channel header --%>
-          <header class="border-b border-base-300 px-5 py-3 flex-shrink-0 flex items-center justify-between">
-            <div>
-              <div class="font-bold text-lg"># {@channel.name}</div>
-              <div :if={@channel.topic} class="text-sm opacity-50">{@channel.topic}</div>
-            </div>
-            <div class="flex items-center gap-2 text-sm opacity-60">
-              <div class="flex items-center gap-1.5">
-                <div class="w-2 h-2 rounded-full bg-success"></div>
-                <span>{MapSet.size(@online_users)} online</span>
+        <%= case @view_mode do %>
+          <% :channel -> %>
+            <header class="border-b border-base-300 px-5 py-3 flex-shrink-0 flex items-center justify-between">
+              <div>
+                <div class="font-bold text-lg"># {@channel.name}</div>
+                <div :if={@channel.topic} class="text-sm opacity-50">{@channel.topic}</div>
               </div>
-            </div>
-          </header>
-
-          <%!-- Messages --%>
-          <div
-            id="messages"
-            phx-hook="ScrollBottom"
-            phx-update="replace"
-            class="flex-1 overflow-y-auto px-5 py-2"
-          >
-            <%= if @messages == [] do %>
-              <div class="flex flex-col items-center justify-center h-full text-center">
-                <div class="text-4xl mb-3">#</div>
-                <h3 class="text-lg font-bold mb-1">This is the beginning of #{@channel.name}</h3>
-                <p :if={@channel.topic} class="text-sm opacity-60 max-w-md">{@channel.topic}</p>
-                <p :if={!@channel.topic} class="text-sm opacity-50">Send a message to get the conversation started.</p>
-              </div>
-            <% else %>
-              <div :for={{msg, show_date, compact} <- @grouped_messages} id={"msg-#{msg.id}"}>
-                <%!-- Date separator --%>
-                <div :if={show_date} class="flex items-center gap-3 my-4">
-                  <div class="flex-1 border-t border-base-300"></div>
-                  <span class="text-xs font-medium opacity-50 whitespace-nowrap">
-                    {format_date_label(DateTime.to_date(msg.inserted_at))}
-                  </span>
-                  <div class="flex-1 border-t border-base-300"></div>
+              <div class="flex items-center gap-2 text-sm opacity-60">
+                <div class="flex items-center gap-1.5">
+                  <div class="w-2 h-2 rounded-full bg-success"></div>
+                  <span>{MapSet.size(@online_users)} online</span>
                 </div>
+              </div>
+            </header>
 
-                <%= if compact do %>
-                  <%!-- Compact message (same author within 5 min) --%>
-                  <div class="message-row group flex items-start pl-12 pr-2 py-0.5 -mx-2 rounded hover:bg-base-200/50 transition-colors relative">
-                    <span class="compact-time text-xs opacity-0 absolute left-1 top-1 w-10 text-right tabular-nums">
-                      {format_time(msg.inserted_at)}
+            <div
+              id="messages"
+              phx-hook="ScrollBottom"
+              phx-update="replace"
+              class="flex-1 overflow-y-auto px-5 py-2"
+            >
+              <%= if @messages == [] do %>
+                <div class="flex flex-col items-center justify-center h-full text-center">
+                  <div class="text-4xl mb-3">#</div>
+                  <h3 class="text-lg font-bold mb-1">This is the beginning of #{@channel.name}</h3>
+                  <p :if={@channel.topic} class="text-sm opacity-60 max-w-md">{@channel.topic}</p>
+                  <p :if={!@channel.topic} class="text-sm opacity-50">Send a message to get the conversation started.</p>
+                </div>
+              <% else %>
+                <div :for={{msg, show_date, compact} <- @grouped_messages} id={"msg-#{msg.id}"}>
+                  <div :if={show_date} class="flex items-center gap-3 my-4">
+                    <div class="flex-1 border-t border-base-300"></div>
+                    <span class="text-xs font-medium opacity-50 whitespace-nowrap">
+                      {format_date_label(DateTime.to_date(msg.inserted_at))}
                     </span>
-                    <div class="flex-1 min-w-0">
-                      <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
-                      <.message_extras msg={msg} current_user_id={@current_user.id} />
-                    </div>
-                    <.message_actions msg={msg} />
+                    <div class="flex-1 border-t border-base-300"></div>
                   </div>
-                <% else %>
-                  <%!-- Full message with avatar and name --%>
-                  <div class="message-row group flex gap-3 pr-2 py-1.5 -mx-2 px-2 rounded hover:bg-base-200/50 transition-colors relative mt-3 first:mt-0">
-                    <div class="flex-shrink-0 mt-0.5">
-                      <div class="avatar">
-                        <div class="w-9 h-9 rounded-full">
-                          <img src={msg.user.avatar_url} alt={user_display(msg)} />
+
+                  <%= if compact do %>
+                    <div class="message-row group flex items-start pl-12 pr-2 py-0.5 -mx-2 rounded hover:bg-base-200/50 transition-colors relative">
+                      <span class="compact-time text-xs opacity-0 absolute left-1 top-1 w-10 text-right tabular-nums">
+                        {format_time(msg.inserted_at)}
+                      </span>
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
+                        <.message_extras msg={msg} current_user_id={@current_user.id} />
+                      </div>
+                      <.message_actions msg={msg} />
+                    </div>
+                  <% else %>
+                    <div class="message-row group flex gap-3 pr-2 py-1.5 -mx-2 px-2 rounded hover:bg-base-200/50 transition-colors relative mt-3 first:mt-0">
+                      <div class="flex-shrink-0 mt-0.5">
+                        <div class="avatar">
+                          <div class="w-9 h-9 rounded-full">
+                            <img src={msg.user.avatar_url} alt={user_display(msg)} />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-baseline gap-2">
-                        <span class="font-semibold text-sm hover:underline cursor-pointer">{user_display(msg)}</span>
-                        <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline gap-2">
+                          <span class="font-semibold text-sm hover:underline cursor-pointer">{user_display(msg)}</span>
+                          <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
+                        </div>
+                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
+                        <.message_extras msg={msg} current_user_id={@current_user.id} />
                       </div>
-                      <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
-                      <.message_extras msg={msg} current_user_id={@current_user.id} />
+                      <.message_actions msg={msg} />
                     </div>
-                    <.message_actions msg={msg} />
-                  </div>
-                <% end %>
-              </div>
-            <% end %>
-          </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
 
-          <%!-- Message input --%>
-          <div class="border-t border-base-300 px-5 py-3 flex-shrink-0">
-            <form phx-submit="send_message">
-              <div class="relative">
-                <textarea
-                  id="message-input"
-                  name="body"
-                  phx-hook="MessageInput"
-                  placeholder={"Message ##{@channel.name}"}
-                  class="message-textarea textarea textarea-bordered w-full pr-16 leading-normal"
-                  autocomplete="off"
-                  rows="1"
-                ></textarea>
-                <button type="submit" class="btn btn-primary btn-sm absolute right-2 bottom-2">
-                  Send
-                </button>
+            <div class="border-t border-base-300 px-5 py-3 flex-shrink-0">
+              <form phx-submit="send_message">
+                <div class="relative">
+                  <textarea
+                    id="message-input"
+                    name="body"
+                    phx-hook="MessageInput"
+                    placeholder={"Message ##{@channel.name}"}
+                    class="message-textarea textarea textarea-bordered w-full pr-16 leading-normal"
+                    autocomplete="off"
+                    rows="1"
+                  ></textarea>
+                  <button type="submit" class="btn btn-primary btn-sm absolute right-2 bottom-2">
+                    Send
+                  </button>
+                </div>
+              </form>
+            </div>
+
+          <% :dm -> %>
+            <% other = other_participant(@conversation, @current_user.id) %>
+            <header class="border-b border-base-300 px-5 py-3 flex-shrink-0 flex items-center gap-3">
+              <div :if={other} class="avatar">
+                <div class="w-8 h-8 rounded-full">
+                  <img src={other.avatar_url} alt={to_string(other.display_label)} />
+                </div>
               </div>
-            </form>
-          </div>
-        <% else %>
-          <%!-- Welcome / no channel selected --%>
-          <div class="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <h1 class="text-4xl font-bold mb-2 tracking-tight">SLOUCH</h1>
-            <p class="text-lg opacity-60 mb-6">Your team's chat, minus the hustle.</p>
-            <%= if @channels == [] do %>
-              <p class="text-sm opacity-50">Create a channel in the sidebar to get started.</p>
-            <% else %>
-              <p class="text-sm opacity-50">Select a channel to start chatting</p>
-            <% end %>
-          </div>
+              <div :if={other} class="font-bold text-lg">{to_string(other.display_label)}</div>
+            </header>
+
+            <div
+              id="dm-messages"
+              phx-hook="ScrollBottom"
+              phx-update="replace"
+              class="flex-1 overflow-y-auto px-5 py-2"
+            >
+              <%= if @dm_messages == [] do %>
+                <div class="flex flex-col items-center justify-center h-full text-center">
+                  <div :if={other} class="avatar mb-3">
+                    <div class="w-16 h-16 rounded-full">
+                      <img src={other.avatar_url} alt={to_string(other.display_label)} />
+                    </div>
+                  </div>
+                  <h3 :if={other} class="text-lg font-bold mb-1">{to_string(other.display_label)}</h3>
+                  <p class="text-sm opacity-50">This is the beginning of your conversation.</p>
+                </div>
+              <% else %>
+                <div :for={{msg, show_date, compact} <- @grouped_dm_messages} id={"dm-#{msg.id}"}>
+                  <div :if={show_date} class="flex items-center gap-3 my-4">
+                    <div class="flex-1 border-t border-base-300"></div>
+                    <span class="text-xs font-medium opacity-50 whitespace-nowrap">
+                      {format_date_label(DateTime.to_date(msg.inserted_at))}
+                    </span>
+                    <div class="flex-1 border-t border-base-300"></div>
+                  </div>
+
+                  <%= if compact do %>
+                    <div class="group flex items-start pl-12 pr-2 py-0.5 -mx-2 rounded hover:bg-base-200/50 transition-colors relative">
+                      <span class="compact-time text-xs opacity-0 absolute left-1 top-1 w-10 text-right tabular-nums">
+                        {format_time(msg.inserted_at)}
+                      </span>
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
+                      </div>
+                    </div>
+                  <% else %>
+                    <div class="group flex gap-3 pr-2 py-1.5 -mx-2 px-2 rounded hover:bg-base-200/50 transition-colors relative mt-3 first:mt-0">
+                      <div class="flex-shrink-0 mt-0.5">
+                        <div class="avatar">
+                          <div class="w-9 h-9 rounded-full">
+                            <img src={msg.user.avatar_url} alt={user_display(msg)} />
+                          </div>
+                        </div>
+                      </div>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline gap-2">
+                          <span class="font-semibold text-sm">{user_display(msg)}</span>
+                          <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
+                        </div>
+                        <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+
+            <div class="border-t border-base-300 px-5 py-3 flex-shrink-0">
+              <form phx-submit="send_dm">
+                <div class="relative">
+                  <textarea
+                    id="dm-input"
+                    name="body"
+                    phx-hook="MessageInput"
+                    placeholder={if other, do: "Message #{to_string(other.display_label)}", else: "Message"}
+                    class="message-textarea textarea textarea-bordered w-full pr-16 leading-normal"
+                    autocomplete="off"
+                    rows="1"
+                  ></textarea>
+                  <button type="submit" class="btn btn-primary btn-sm absolute right-2 bottom-2">
+                    Send
+                  </button>
+                </div>
+              </form>
+            </div>
+
+          <% _ -> %>
+            <div class="flex-1 flex flex-col items-center justify-center text-center p-8">
+              <h1 class="text-4xl font-bold mb-2 tracking-tight">SLOUCH</h1>
+              <p class="text-lg opacity-60 mb-6">Your team's chat, minus the hustle.</p>
+              <%= if @channels == [] do %>
+                <p class="text-sm opacity-50">Create a channel in the sidebar to get started.</p>
+              <% else %>
+                <p class="text-sm opacity-50">Select a channel or conversation to start chatting</p>
+              <% end %>
+            </div>
         <% end %>
       </main>
 
-      <%!-- Thread panel --%>
       <div :if={@show_thread} class="thread-panel w-96 border-l border-base-300 flex flex-col bg-base-100 flex-shrink-0">
         <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
           <h3 class="font-bold">Thread</h3>
@@ -592,7 +897,6 @@ defmodule SlouchWeb.ChatLive do
       </div>
     </div>
 
-    <%!-- Profile modal --%>
     <dialog id="profile-modal" class="modal">
       <div class="modal-box">
         <h3 class="font-bold text-lg mb-4">Edit Profile</h3>
@@ -634,7 +938,6 @@ defmodule SlouchWeb.ChatLive do
 
   defp message_extras(assigns) do
     ~H"""
-    <%!-- Reactions --%>
     <div :if={@msg.reactions != []} class="flex items-center gap-1 mt-1 flex-wrap">
       <button
         :for={reaction_group <- group_reactions(@msg.reactions, @current_user_id)}
@@ -650,7 +953,6 @@ defmodule SlouchWeb.ChatLive do
         <span>{reaction_group.count}</span>
       </button>
     </div>
-    <%!-- Thread indicator --%>
     <div :if={@msg.reply_count > 0} class="mt-1">
       <button
         phx-click="open_thread"
@@ -666,7 +968,6 @@ defmodule SlouchWeb.ChatLive do
   defp message_actions(assigns) do
     ~H"""
     <div class="message-actions opacity-0 transition-opacity absolute -top-3 right-2 flex items-center bg-base-100 border border-base-300 rounded-full shadow-sm px-1 h-8">
-      <%!-- Quick reaction emojis --%>
       <button
         :for={emoji <- ~w(👍 😂 ✅)}
         phx-click="toggle_reaction"
@@ -677,7 +978,6 @@ defmodule SlouchWeb.ChatLive do
       >
         {emoji}
       </button>
-      <%!-- More reactions picker --%>
       <div class="dropdown dropdown-end dropdown-top">
         <div
           tabindex="0"
@@ -705,7 +1005,6 @@ defmodule SlouchWeb.ChatLive do
         </div>
       </div>
       <div class="w-px h-4 bg-base-300 mx-0.5"></div>
-      <%!-- Thread reply --%>
       <button
         phx-click="open_thread"
         phx-value-message-id={@msg.id}
