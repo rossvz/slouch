@@ -42,6 +42,7 @@ defmodule Slouch.Accounts.User do
       password :password do
         identity_field :email
         hashed_password_field :hashed_password
+        register_action_accept [:display_name]
 
         resettable do
           sender Slouch.Accounts.User.Senders.SendPasswordResetEmail

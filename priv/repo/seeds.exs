@@ -9,7 +9,8 @@ alice =
   |> Ash.Changeset.for_create(:register_with_password, %{
     email: "alice@example.com",
     password: "password123456",
-    password_confirmation: "password123456"
+    password_confirmation: "password123456",
+    display_name: "Alice"
   })
   |> Ash.create!(authorize?: false)
 
@@ -18,7 +19,8 @@ bob =
   |> Ash.Changeset.for_create(:register_with_password, %{
     email: "bob@example.com",
     password: "password123456",
-    password_confirmation: "password123456"
+    password_confirmation: "password123456",
+    display_name: "Bob"
   })
   |> Ash.create!(authorize?: false)
 
@@ -30,9 +32,6 @@ for user <- [alice, bob] do
   |> Ecto.Changeset.change(%{confirmed_at: now})
   |> Slouch.Repo.update!()
 end
-
-alice |> Ecto.Changeset.change(%{display_name: "Alice"}) |> Slouch.Repo.update!()
-bob |> Ecto.Changeset.change(%{display_name: "Bob"}) |> Slouch.Repo.update!()
 
 IO.puts("Created users: alice@example.com, bob@example.com (password: password123456)")
 
