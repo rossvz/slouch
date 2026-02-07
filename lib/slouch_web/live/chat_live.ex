@@ -281,6 +281,19 @@ defmodule SlouchWeb.ChatLive do
     end
   end
 
+  def handle_event("randomize_avatar", _params, socket) do
+    user = socket.assigns.current_user
+    seed = Ash.UUID.generate()
+
+    updated_user =
+      user
+      |> Ash.Changeset.for_update(:update_profile, %{avatar_seed: seed})
+      |> Ash.update!(actor: user)
+      |> Ash.load!([:avatar_url, :display_label])
+
+    {:noreply, assign(socket, current_user: updated_user)}
+  end
+
   def handle_event("update_profile", params, socket) do
     user = socket.assigns.current_user
 
@@ -916,7 +929,10 @@ defmodule SlouchWeb.ChatLive do
                 <img src={@current_user.avatar_url} alt="Avatar" />
               </div>
             </div>
-            <p class="text-sm text-base-content/60">{@current_user.email}</p>
+            <button type="button" phx-click="randomize_avatar" class="btn btn-ghost btn-xs mt-1">
+              <.icon name="hero-arrow-path" class="w-3.5 h-3.5" /> Randomize
+            </button>
+            <p class="text-sm text-base-content/60 mt-1">{@current_user.email}</p>
           </div>
 
           <div class="form-control mb-3">
