@@ -16,7 +16,7 @@ defmodule SlouchWeb.ChatLive do
       Slouch.Accounts.User
       |> Ash.read!()
       |> Ash.load!([:avatar_url, :display_label])
-      |> Enum.reject(&(&1.id == current_user.id))
+      |> Enum.reject(&(&1.id == current_user.id || &1.is_bot))
 
     {:ok,
      assign(socket,
@@ -215,6 +215,12 @@ defmodule SlouchWeb.ChatLive do
         Slouch.PubSub,
         "chat:#{channel.id}",
         {:new_message, message}
+      )
+
+      Phoenix.PubSub.broadcast(
+        Slouch.PubSub,
+        "bot:mentions",
+        {:check_mentions, message, channel}
       )
 
       {:noreply, socket}
@@ -693,6 +699,7 @@ defmodule SlouchWeb.ChatLive do
                       <div class="flex-1 min-w-0">
                         <div class="flex items-baseline gap-2">
                           <span class="font-semibold text-sm hover:underline cursor-pointer">{user_display(msg)}</span>
+                          <.bot_badge :if={msg.user.is_bot} />
                           <span class="text-xs opacity-40">{format_time(msg.inserted_at)}</span>
                         </div>
                         <div class="text-sm whitespace-pre-wrap">{msg.body}</div>
@@ -844,6 +851,7 @@ defmodule SlouchWeb.ChatLive do
             <div class="min-w-0">
               <div class="flex items-baseline gap-2">
                 <span class="font-semibold text-sm">{user_display(@thread_parent)}</span>
+                <.bot_badge :if={@thread_parent.user.is_bot} />
                 <span class="text-xs opacity-40">{format_time(@thread_parent.inserted_at)}</span>
               </div>
               <p class="text-sm mt-0.5 whitespace-pre-wrap">{@thread_parent.body}</p>
@@ -869,6 +877,7 @@ defmodule SlouchWeb.ChatLive do
             <div class="min-w-0">
               <div class="flex items-baseline gap-2">
                 <span class="font-semibold text-sm">{user_display(reply)}</span>
+                <.bot_badge :if={reply.user.is_bot} />
                 <span class="text-xs opacity-40">{format_time(reply.inserted_at)}</span>
               </div>
               <p class="text-sm mt-0.5 whitespace-pre-wrap">{reply.body}</p>
@@ -933,6 +942,12 @@ defmodule SlouchWeb.ChatLive do
     </dialog>
 
     <Layouts.flash_group flash={@flash} />
+    """
+  end
+
+  defp bot_badge(assigns) do
+    ~H"""
+    <span class="badge badge-xs badge-primary font-semibold tracking-wide">BOT</span>
     """
   end
 

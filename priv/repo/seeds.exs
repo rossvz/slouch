@@ -1,5 +1,6 @@
 alias Slouch.Accounts.User
 alias Slouch.Chat.{Channel, Message, Membership, Conversation, ConversationParticipant, DirectMessage}
+alias Slouch.Bots.Bot
 
 IO.puts("Seeding database...")
 
@@ -122,4 +123,31 @@ for {user, body} <- [
 end
 
 IO.puts("Created DM conversation between Alice and Bob")
+
+# Create bot user and bot record
+github_bot_user =
+  User
+  |> Ash.Changeset.for_create(:register_with_password, %{
+    email: "github-bot@slouch.local",
+    password: "botpassword123456",
+    password_confirmation: "botpassword123456",
+    display_name: "GithubIssueBot"
+  })
+  |> Ash.create!(authorize?: false)
+
+github_bot_user
+|> Ecto.Changeset.change(%{confirmed_at: now, is_bot: true})
+|> Slouch.Repo.update!()
+
+Bot
+|> Ash.Changeset.for_create(:create, %{
+  name: "GithubIssueBot",
+  description: "Creates GitHub issues when mentioned. Usage: @GithubIssueBot create issue: Your title here",
+  handler_module: "Elixir.Slouch.Bots.Handlers.GithubIssueBot",
+  is_active: true,
+  user_id: github_bot_user.id
+})
+|> Ash.create!(authorize?: false)
+
+IO.puts("Created GithubIssueBot")
 IO.puts("Seeding complete!")

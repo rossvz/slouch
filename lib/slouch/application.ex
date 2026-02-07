@@ -17,7 +17,8 @@ defmodule Slouch.Application do
       # Start to serve requests, typically the last entry
       SlouchWeb.Endpoint,
       SlouchWeb.Presence,
-      {AshAuthentication.Supervisor, [otp_app: :slouch]}
+      {AshAuthentication.Supervisor, [otp_app: :slouch]},
+      Slouch.Bots.Dispatcher
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
