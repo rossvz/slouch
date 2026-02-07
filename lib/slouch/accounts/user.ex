@@ -59,7 +59,7 @@ defmodule Slouch.Accounts.User do
   end
 
   calculations do
-    calculate :avatar_url, :string, expr("https://api.dicebear.com/7.x/bottts-neutral/svg?seed=" <> email)
+    calculate :avatar_url, :string, expr("https://api.dicebear.com/7.x/bottts-neutral/svg?seed=" <> (avatar_seed || email))
     calculate :display_label, :string, expr(display_name || email)
   end
 
@@ -107,7 +107,7 @@ defmodule Slouch.Accounts.User do
     end
 
     update :update_profile do
-      accept [:display_name, :status_emoji, :status_text]
+      accept [:display_name, :status_emoji, :status_text, :avatar_seed]
     end
 
     action :request_magic_link do
@@ -161,6 +161,11 @@ defmodule Slouch.Accounts.User do
     end
 
     attribute :status_text, :string do
+      allow_nil? true
+      public? true
+    end
+
+    attribute :avatar_seed, :string do
       allow_nil? true
       public? true
     end
