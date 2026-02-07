@@ -2,6 +2,6 @@ defmodule SlouchWeb.AuthOverrides do
   use AshAuthentication.Phoenix.Overrides
 
   override AshAuthentication.Phoenix.Components.Password do
-    set :register_extra_component, SlouchWeb.Components.RegisterExtra
+    set :register_extra_component, &SlouchWeb.Components.RegisterExtra.render/1
   end
 end
