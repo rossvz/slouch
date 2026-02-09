@@ -85,6 +85,19 @@ defmodule SlouchWeb.ChatLive do
         display_label: to_string(socket.assigns.current_user.display_label),
         joined_at: System.system_time(:second)
       })
+
+      already_member? =
+        Slouch.Chat.Membership
+        |> Ash.Query.do_filter(%{channel_id: channel.id, user_id: socket.assigns.current_user.id})
+        |> Ash.exists?(authorize?: false)
+
+      unless already_member? do
+        Phoenix.PubSub.broadcast(
+          Slouch.PubSub,
+          "bot:channel_join",
+          {:channel_join, socket.assigns.current_user, channel}
+        )
+      end
     end
 
     messages =
@@ -253,6 +266,12 @@ defmodule SlouchWeb.ChatLive do
         Slouch.PubSub,
         "bot:mentions",
         {:check_mentions, message, channel}
+      )
+
+      Phoenix.PubSub.broadcast(
+        Slouch.PubSub,
+        "bot:all_messages",
+        {:check_all_messages, message, channel}
       )
 
       {:noreply, socket}
@@ -707,6 +726,13 @@ defmodule SlouchWeb.ChatLive do
             </div>
           </form>
 
+          <div class="px-2 mt-4 mb-2">
+            <.link navigate={~p"/bots"} class="flex items-center gap-2 px-3 py-1.5 rounded text-sm hover:bg-base-100/50 opacity-80 hover:opacity-100 transition-colors">
+              <.icon name="hero-cpu-chip" class="w-4 h-4" />
+              <span>Bot Management</span>
+            </.link>
+          </div>
+
           <div class="px-2 mt-5 mb-1 text-xs font-semibold uppercase tracking-wider opacity-50">
             Direct Messages
           </div>
@@ -1132,7 +1158,7 @@ defmodule SlouchWeb.ChatLive do
       <% else %>
         <div class="message-row group flex gap-3 pr-2 py-1.5 -mx-2 px-2 rounded hover:bg-base-200/50 transition-colors relative mt-3 first:mt-0">
           <div class="flex-shrink-0 mt-0.5">
-            <div class="avatar">
+            <div class={["avatar", Map.get(msg.user, :is_bot, false) && "ring-2 ring-secondary ring-offset-1 ring-offset-base-100 rounded-full"]}>
               <div class="w-9 h-9 rounded-full">
                 <img src={msg.user.avatar_url} alt={user_display(msg)} />
               </div>
@@ -1158,7 +1184,12 @@ defmodule SlouchWeb.ChatLive do
 
   defp bot_badge(assigns) do
     ~H"""
-    <span class="badge badge-xs badge-primary font-semibold tracking-wide">BOT</span>
+    <span class="badge badge-xs badge-secondary font-bold tracking-wider uppercase gap-0.5">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-2.5 h-2.5">
+        <path d="M8 1a2 2 0 0 0-2 2v1H4.5A2.5 2.5 0 0 0 2 6.5v5A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-5A2.5 2.5 0 0 0 11.5 4H10V3a2 2 0 0 0-2-2ZM6 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm5-1a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM5.5 11a.5.5 0 0 1 0-1h5a.5.5 0 0 1 0 1h-5Z"/>
+      </svg>
+      BOT
+    </span>
     """
   end
 
